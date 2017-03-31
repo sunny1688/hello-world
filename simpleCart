@@ -1,0 +1,1538 @@
+(function (window, document) {
+	/*global HTMLElement */
+
+	var typeof_string			= typeof "",
+		typeof_undefined		= typeof undefined,
+		typeof_function			= typeof function () {},
+		typeof_object			= typeof {},
+		isTypeOf				= function (item, type) { return typeof item === type; },
+		isString				= function (item) { return isTypeOf(item, typeof_string); },
+		isUndefined				= function (item) { return isTypeOf(item, typeof_undefined); },
+		isFunction				= function (item) { return isTypeOf(item, typeof_function); },
+
+		isObject				= function (item) { return isTypeOf(item, typeof_object); },
+		//Returns true if it is a DOM element
+		isElement				= function (o) {
+			return typeof HTMLElement === "object" ? o instanceof HTMLElement : typeof o === "object" && o.nodeType === 1 && typeof o.nodeName === "string";
+		},
+		//综上所述先定义好很多判断语句，判断元素的类型以及元素的本身是什么；为下一步做准备，所有的变量都是在全局中声明的；
+
+		generateSimpleCart = function (space) {
+			// stealing this from selectivizr；判断选择器的引擎，以确定库的引入；本方案适用于jquery
+			var selectorEngines = {
+				"jQuery"							: "*"
+			},//我们只支持jquery，不用jquery青放弃本方案
+
+				// local variables for internal use 基本变量
+				item_id					= 0,
+				item_id_namespace		= "SCI-",
+				sc_items				= {},//购物车的选项
+				namespace				= space || "simpleCart",//命名空间的设置；我还是头一次遇到，类似于jquery和$之间的关系
+				selectorFunctions		= {},//选择器函数
+				eventFunctions			= {},//事件函数
+				baseEvents				= {},//基本事件函数
+
+				// local references
+				localStorage			= window.localStorage,//支持localstorage
+				console					= window.console || { msgs: [], log: function (msg) { console.msgs.push(msg); } },
+
+				// used in views 用于显示
+				_VALUE_		= 'value',
+				_TEXT_		= 'text',
+				_HTML_		= 'html',
+				_CLICK_		= 'click',
+
+				// Currencies 货币 我们只支持美元；其他的一概不支持
+				currencies = {
+					"USD": { code: "USD", symbol: "&#36;", name: "US Dollar" },//美元的标志&#36；代码：USD；名称：US Dollar
+				},
+
+				// default options 接下来的就是常规设置；开始有难度的代码了；套路也很深
+				settings = {
+					checkout				: { type: "PayPal", email: "x431software@gmail.com" },//付款方式以及收款的账号
+					currency				: "USD",//当前货币是美元
+					language				: "english-us",//语言是英语
+					cartStyle				: "div",//购物车样式
+					cartColumns			: [//显示出来的几项内容；我们也可以从这里更改要显示的项目；其中每一项都是以一个对象呈现出来；全部放在一个数组当中
+						{ attr: "name", label: "Name" },
+						{ attr: "price", label: "Price", view: 'currency' },
+                        { attr: "image", label: "Image" ,view:'image'},//添加的image属性
+						{ view: "decrement", label: false },
+						{ attr: "quantity", label: "Qty" },
+						{ view: "increment", label: false },
+						{ attr: "total", label: "SubTotal", view: 'currency' },
+						{ view: "remove", text: "Remove", label: false }
+					],
+					excludeFromCheckout	: ['thumb'],//没有理解这个意思；目前只知道是一个数组；里面只有一个值；而且是字符串形式的
+
+					shippingFlatRate		: 0,//运费统一费率
+					shippingQuantityRate	: 0,//运费的数量增加率
+					shippingTotalRate		: 0,//运费总的费率
+					shippingCustom		: null,//不懂,这叫运费自定义；默认情况是不存在的
+
+					taxRate				: 0,//税率
+					
+					taxShipping			: false,//税收运费，这个选项是不存在的
+
+					data				: {}//存放的数据变量
+					//以上就是一些基本设置；就是一个对象，设置了一些属性，赋予属性一些值；有的是标量，有的是数组，对象
+
+				},//默认的设置
+
+
+				// main simpleCart object, function call is used for setting options----回调函数用于设置选项！！！！
+				simpleCart = function (options) {
+					// shortcut for simpleCart.ready
+					if (isFunction(options)) {
+						return simpleCart.ready(options);
+					}
+
+					// set options
+					if (isObject(options)) {
+						return simpleCart.extend(settings, options);
+					}
+				},//购物车主要程序----程序入口
+
+				// selector engine
+				$engine,//选择器
+
+				// built in cart views for item cells
+				cartColumnViews;//建立购物车界面
+
+
+	//var的内容到此结束；下面是新的内容
+//-----------------------------------------------------------------------------------------------------------------------------------------
+
+
+			// function for extending objects
+			simpleCart.extend = function (target, opts) {
+				var next;
+
+				if (isUndefined(opts)) {
+					opts = target;
+					target = simpleCart;
+				}
+
+				for (next in opts) {
+					if (Object.prototype.hasOwnProperty.call(opts, next)) {
+						target[next] = opts[next];
+					}
+				}
+				return target;
+			};//扩展的方法，此方法是将target这个对象吸收进来；从而使得simplecart具备target各个属性；同时也拥有extend方法；名曰吸星大法！！！！！！但是如果opts有值；那么就会完全成为对方;此方法是基础方法，谁用谁知道
+
+			// create copy function
+			simpleCart.extend({
+				copy: function (n) {
+					var cp = generateSimpleCart(n);
+					cp.init();
+					return cp;
+				}
+			});//第一次使用；建立方法副本；只有一个参数，那就是吸星大法，使得这个extend方法更加强大。但是表示这个方法没看懂
+
+			// add in the core functionality 第二次使用；准备了一大波的功能；即将上场；让我们拭目以待；但是这些功能没有实体；都是些机枪；手枪；
+			simpleCart.extend({
+
+				isReady: false,//准备好了吗？
+
+				// this is where the magic happens, the add function这是一个神奇的方法；但是我没看懂
+				add: function (values, opt_quiet) {//又是定义了一大顿变量；说不定到后来都有用；可是现在是看不懂的
+					var info		= values || {},//短路运算符；如果有values；那就赋给info
+						newItem		= new simpleCart.Item(info),//实例化一个项目，新的
+						addItem 	= true,//
+						// optionally supress event triggers
+						quiet 		= opt_quiet === true ? opt_quiet : false,
+						oldItem;//旧的项目，只是声明了一个变量；没有赋值
+
+					// trigger before add event
+					if (!quiet) {//如果quiet是false；也就是说 没有opt_quiet；那么就执行下面的代码
+					  	addItem = simpleCart.trigger('beforeAdd', [newItem]);//又是一个方法；传入了看不懂的参数---挂起来ing
+					
+						if (addItem === false) {
+							return false;
+						}
+					}
+					
+					// if the new item already exists, increment the value
+					oldItem = simpleCart.has(newItem);//一赋值就是一个函数的结果，传入的参数是newItem
+					if (oldItem) {//如果oldItem存在；那就执行以下代码
+						oldItem.increment(newItem.quantity());
+						newItem = oldItem;
+
+					// otherwise add the item
+					} else {//如果不存在；那就....
+						sc_items[newItem.id()] = newItem;
+					}
+
+					// update the cart
+					simpleCart.update();//你懂得，update
+
+					if (!quiet) {//事件后触发
+						// trigger after add event
+						simpleCart.trigger('afterAdd', [newItem, isUndefined(oldItem)]);
+					}
+
+					// return a reference to the added item
+					return newItem;
+				},//添加选项，里面的套路基本上清楚了；做了很多的判断；存在不存在的问题，以后更新问题...
+
+
+				// iteration function 迭代方法；至于用处还没有想清楚
+				each: function (array, callback) {
+					var next,//只是声明了一个变量；没有赋值
+						x = 0,
+						result,//只是声明了一个变量；没有赋值
+						cb,//只是声明了一个变量；没有赋值
+						items;//只是声明了一个变量；没有赋值
+
+					if (isFunction(array)) {//判断array是不是function
+						cb = array;//那么cb是一个数组
+						items = sc_items;
+					} else if (isFunction(callback)) {//判断callback是不是function
+						cb = callback;//那cb就是个函数...
+						items = array;
+					} else {
+						return;
+					}
+
+					for (next in items) {
+						if (Object.prototype.hasOwnProperty.call(items, next)) {
+							result = cb.call(simpleCart, items[next], x, next);
+							if (result === false) {
+								return;
+							}
+							x += 1;
+						}
+					}//做了一个大循环！！！！！！！！！！！！！！！！！！鬼知道干嘛用的
+				},
+
+				find: function (id) {
+					var items = [];//又声明了一个数组
+
+					// return object for id if it exists
+					if (isObject(sc_items[id])) {//返回这个对象的id；如果存在的话
+						return sc_items[id];
+					}
+					// search through items with the given criteria 在给定的条件下搜索项目；也就是查找；这有什么难得；就是制定条目吗
+					if (isObject(id)) {//返回的是一个布尔类型的值
+						simpleCart.each(function (item) {
+							var match = true;
+							simpleCart.each(id, function (val, x, attr) {
+
+								if (isString(val)) {
+									// less than or equal to
+									if (val.match(/<=.*/)) {
+										val = parseFloat(val.replace('<=', ''));
+										if (!(item.get(attr) && parseFloat(item.get(attr)) <= val)) {
+											match = false;
+										}
+
+									// less than
+									} else if (val.match(/</)) {
+										val = parseFloat(val.replace('<', ''));
+										if (!(item.get(attr) && parseFloat(item.get(attr)) < val)) {
+											match = false;
+										}
+
+									// greater than or equal to
+									} else if (val.match(/>=/)) {
+										val = parseFloat(val.replace('>=', ''));
+										if (!(item.get(attr) && parseFloat(item.get(attr)) >= val)) {
+											match = false;
+										}
+
+									// greater than
+									} else if (val.match(/>/)) {
+										val = parseFloat(val.replace('>', ''));
+										if (!(item.get(attr) && parseFloat(item.get(attr)) > val)) {
+											match = false;
+										}
+
+									// equal to
+									} else if (!(item.get(attr) && item.get(attr) === val)) {
+										match = false;
+									}
+
+								// equal to non string
+								} else if (!(item.get(attr) && item.get(attr) === val)) {
+									match = false;
+								}
+
+								return match;
+							});
+
+							// add the item if it matches
+							if (match) {
+								items.push(item);
+							}
+						});
+						return items;
+					}
+
+					// if no criteria is given we return all items
+					if (isUndefined(id)) {
+
+						// use a new array so we don't give a reference to the
+						// cart's item array
+						simpleCart.each(function (item) {
+							items.push(item);
+						});
+						return items;
+					}
+
+					// return empty array as default
+					return items;
+				},
+
+				// return all items
+				items: function () {//返回找到的项目
+					return this.find();
+				},
+
+				// check to see if item is in the cart already
+				has: function (item) {
+					var match = false;
+
+					simpleCart.each(function (testItem) {
+						if (testItem.equals(item)) {
+							match = testItem;
+						}
+					});
+					return match;
+				},//查看购物车中是否存在这个商品
+
+				// empty the cart
+				empty: function () {
+					// remove each item individually so we see the remove events
+					var newItems = {};
+					simpleCart.each(function (item) {
+						// send a param of true to make sure it doesn't
+						// update after every removal
+						// keep the item if the function returns false,
+						// because we know it has been prevented 
+						// from being removed
+						if (item.remove(true) === false) {
+							newItems[item.id()] = item
+						}
+					});
+					sc_items = newItems;
+					simpleCart.update();
+				},//清空购物车
+
+
+				// functions for accessing cart info---------------------------------------访问购物车信息
+				quantity: function () {
+					var quantity = 0;
+					simpleCart.each(function (item) {
+						quantity += item.quantity();
+					});
+					return quantity;
+				},//数量
+
+				total: function () {
+					var total = 0;
+					simpleCart.each(function (item) {
+						total += item.total();
+					});
+					return total;
+				},//价值
+
+				grandTotal: function () {
+					return simpleCart.total() + simpleCart.tax() + simpleCart.shipping()*simpleCart.quantity();//购物车的商品价格+税费+运费
+				},//总价额
+
+
+				// updating functions---------------------------------------------------更新功能
+				update: function () {
+					simpleCart.save();
+					simpleCart.trigger("update");
+				},
+
+				init: function () {
+					simpleCart.load();
+					simpleCart.update();
+					simpleCart.ready();
+				},//初始化
+
+				// view management------------------------------我都快被整死了；这个节奏实在是看不懂
+				$: function (selector) {//jquery的选取功能；查看
+					return new simpleCart.ELEMENT(selector);
+				},
+
+				$create: function (tag) {//创建功能
+					return simpleCart.$(document.createElement(tag));
+				},
+
+				setupViewTool: function () {
+					var members, member, context = window, engine;//又是声明了许多的变量,
+					// var members;
+                    // var member;
+                    // var context = window;
+                    // var engine; 这才是我经常写的方式
+
+					// Determine the "best fit" selector engine//选择一个合适的引擎；可是我只有一个jquery，没得选
+					for (engine in selectorEngines) {
+						if (Object.prototype.hasOwnProperty.call(selectorEngines, engine) && window[engine]) {
+							members = selectorEngines[engine].replace("*", engine).split(".");
+							member = members.shift();
+							if (member) {
+								context = context[member];
+							}
+							if (typeof context === "function") {
+								// set the selector engine and extend the prototype of our
+								// element wrapper class
+								$engine = context;
+								simpleCart.extend(simpleCart.ELEMENT._, selectorFunctions[engine]);
+								return;
+							}
+						}
+					}
+				},
+
+				// return a list of id's in the cart-----------------怎么？返回一个列表？ id的列表。。。。。几个意思
+				ids: function () {
+					var ids = [];//声明一个数组用来存放
+					simpleCart.each(function (item) {//调用each方法
+						ids.push(item.id());//将每一个id存放在数组中
+					});
+					return ids;//返回这个列表
+
+				},//貌似做的天衣无缝；像回事儿
+
+
+				// storage------------------------------------存储？就这么简单？没了；不给点提示什么的
+				save: function () {
+					simpleCart.trigger('beforeSave');//又是触发一个trigger事件；我哪里知道这是什么玩意；在玩我吗？？？
+
+					var items = {};//声明了一个对象；干啥用的？谁知道啊
+
+					// save all the items-----反正是遍历了一下；拿到项目了
+					simpleCart.each(function (item) {//又是涉及到一个叫id的方法；是个什么鬼
+						items[item.id()] = simpleCart.extend(item.fields(), item.options());
+					});
+
+					localStorage.setItem(namespace + "_items", JSON.stringify(items));//居然启动了localstorage；可以
+
+					simpleCart.trigger('afterSave');//又触发了trigger方法；要好好研究
+				},
+
+				load: function () {
+
+					// empty without the update
+					sc_items = {};//将项目清空先
+
+					var items = localStorage.getItem(namespace + "_items");//从local中取出数据
+
+					if (!items) {//如果为空；就返回
+						return;
+					}
+					
+					// we wrap this in a try statement so we can catch 
+					// any json parsing errors. no more stick and we
+					// have a playing card pluckin the spokes now...
+					// soundin like a harley.
+					try {//要研究一下你的作用；好长时间没有看到你了
+						simpleCart.each(JSON.parse(items), function (item) {
+							simpleCart.add(item, true);
+						});
+					} catch (e){
+						simpleCart.error( "Error Loading data: " + e );
+					}
+
+
+					simpleCart.trigger('load');
+				},
+
+				// ready function used as a shortcut for bind('ready',fn)
+				ready: function (fn) {//是谁的简写形式；几个意思；搞得不清不楚的；不让人看懂是吧
+
+					if (isFunction(fn)) {
+						// call function if already ready already
+						if (simpleCart.isReady) {
+							fn.call(simpleCart);
+
+						// bind if not ready
+						} else {
+							simpleCart.bind('ready', fn);
+						}
+
+					// trigger ready event
+					} else if (isUndefined(fn) && !simpleCart.isReady) {
+						simpleCart.trigger('ready');
+						simpleCart.isReady = true;
+					}
+
+				},
+
+
+				error: function (message) {
+					var msg = "";//都有错误机制；了得了。。。。。
+					if (isString(message)) {
+						msg = message;
+					} else if (isObject(message) && isString(message.message)) {
+						msg = message.message;
+					}
+					try { console.log("simpleCart(js) Error: " + msg); } catch (e) {}
+					simpleCart.trigger('error', [message]);
+				}
+			});//增加核心功能，也是只有一个参数，还是吸星大法；强大
+
+
+			/*******************************************************************
+			 *	TAX AND SHIPPING
+			 *******************************************************************/
+			simpleCart.extend({//着几大块是个硬骨头；
+
+				// TODO: tax and shipping
+				tax: function () {//默认是不存在税费的
+					var totalToTax = settings.taxShipping ? simpleCart.total() + simpleCart.shipping() : simpleCart.total(),
+						cost = simpleCart.taxRate() * totalToTax;
+					
+					simpleCart.each(function (item) {
+						if (item.get('tax')) {
+							cost += item.get('tax');
+						} else if (item.get('taxRate')) {
+							cost += item.get('taxRate') * item.total();
+						}
+					});
+					return parseFloat(cost);
+				},//税收
+				
+				taxRate: function () {
+					return settings.taxRate || 0;
+				},//税率
+
+				shipping: function (opt_custom_function) {//运费是最扯淡的；要弄清楚他；要看很多数据
+
+					// shortcut to extend options with custom shipping
+					if (isFunction(opt_custom_function)) {//运费自定义；如果存在的话就执行自己定义的运费；如果不存在就跳过
+						simpleCart({
+							shippingCustom: opt_custom_function
+						});
+						return;
+					}
+					//显然要声明一个运费的变量来接住这个值；至于计算公式就呵呵了；常规设置，如果不符合要求可以修改
+					var cost = settings.shippingQuantityRate * simpleCart.quantity() +
+							settings.shippingTotalRate * simpleCart.total() +
+							settings.shippingFlatRate;
+
+					if (isFunction(settings.shippingCustom)) {
+						cost += settings.shippingCustom.call(simpleCart);
+					}
+
+					simpleCart.each(function (item) {
+						cost += parseFloat(item.get('shipping') || 0);
+					});
+					return parseFloat(cost);
+				}//运费
+
+			});//,也是只有一个参数，还是吸星大法；强大
+
+			/*******************************************************************
+			 *	CART VIEWS
+			 *******************************************************************/
+
+			// built in cart views for item cells
+			cartColumnViews = {//这是些显示在页面中的元素；该有的都有了；每个属性返回一个值给
+				attr: function (item, column) {
+					return item.get(column.attr) || "";
+				},//属性
+
+				currency: function (item, column) {
+					return simpleCart.toCurrency(item.get(column.attr) || 0);
+				},//货币
+
+				link: function (item, column) {
+					return "<a href='" + item.get(column.attr) + "'>" + column.text + "</a>";
+				},//链接
+
+				decrement: function (item, column) {
+					return "<a href='javascript:;' class='" + namespace + "_decrement'>" + (column.text || "-") + "</a>";
+				},//减少
+
+				increment: function (item, column) {
+					return "<a href='javascript:;' class='" + namespace + "_increment'>" + (column.text || "+") + "</a>";
+				},//增加
+
+				image: function (item, column) {
+					return "<img src='" + item.get(column.attr) + "'/>";
+				},//图像
+
+				input: function (item, column) {
+					return "<input type='text' value='" + item.get(column.attr) + "' class='" + namespace + "_input'/>";
+				},//输入框
+
+				remove: function (item, column) {
+					return "<a href='javascript:;' class='" + namespace + "_remove'>" + (column.text || "X") + "</a>";
+				}//去掉
+			};
+
+			// cart column wrapper class and functions购物车的每一列包裹着类名和方法
+			function cartColumn(opts) {//最终显示的是options的自定义属性；这个属性让我们可以定制化
+				var options = opts || {};
+				return simpleCart.extend({
+					attr			: "",
+					label			: "",
+					view			: "attr",
+					text			: "",
+					className		: "",
+					hide			: false
+				}, options);
+			};
+
+			function cartCellView(item, column) {//又是牛逼的三目运算符；我是最讨厌这个玩意的
+				var viewFunc = isFunction(column.view) ? column.view : isString(column.view) && isFunction(cartColumnViews[column.view]) ? cartColumnViews[column.view] : cartColumnViews.attr;
+
+				return viewFunc.call(simpleCart, item, column);
+			};
+
+			simpleCart.extend({
+				// write out cart 试着把这个购物车写出来
+				writeCart: function (selector) {//将一个选择器名称传入进来
+					var TABLE = settings.cartStyle.toLowerCase(),//"div"
+						isTable = TABLE === 'table',//如果是table的话；那就怎么怎么干；如果不是的话，也有很多防守；这个插件写的。。。。。
+						TR = isTable ? "tr" : "div",//我觉得吧；最好弄成table比较好；
+						TH = isTable ? 'th' : 'div',//
+						TD = isTable ? 'td' : 'div',//
+						THEAD = isTable ? 'thead' : 'div',//
+						cart_container = simpleCart.$create(TABLE),//
+						thead_container = simpleCart.$create(THEAD),//
+						header_container = simpleCart.$create(TR).addClass('headerRow'),//
+						container = simpleCart.$(selector),//
+						column,//
+						klass,//
+						label,//
+						x,//
+						xlen;//声明了一大堆页面元素的属性；让我们拭目以待
+
+					container.html(' ').append(cart_container);//...
+
+					cart_container.append(thead_container);//...
+
+					thead_container.append(header_container);//挂在了dom树了
+
+
+					// create header
+					for (x = 0, xlen = settings.cartColumns.length; x < xlen; x += 1) {//cartColumns中有几项就显示几项；一切都是程序控制的
+						column	= cartColumn(settings.cartColumns[x]);//又是一个方法；传入了一个参数；熟悉的套路；熟悉的味道；就看你能藏多深
+						klass	=  "item-" + (column.attr || column.view || column.label || column.text || "cell") + " " + column.className;//所以如果代码有更改；这里也要变化；懂否？
+						label	= column.label || "";
+
+						// append the header cell
+						header_container.append(
+							simpleCart.$create(TH).addClass(klass).html(label)
+						);
+					}
+
+					// cycle through the items
+					simpleCart.each(function (item, y) {
+						simpleCart.createCartRow(item, y, TR, TD, cart_container);
+					});
+
+					return cart_container;
+				},
+
+				// generate a cart row from an item 生成一个行
+				createCartRow: function (item, y, TR, TD, container) {
+					var row = simpleCart.$create(TR)
+										.addClass('itemRow row-' + y + " " + (y % 2 ? "even" : "odd"))
+										.attr('id', "cartItem_" + item.id()),
+						j,
+						jlen,
+						column,
+						klass,
+						content,
+						cell;
+
+					container.append(row);
+
+					// cycle through the columns to create each cell for the item
+					for (j = 0, jlen = settings.cartColumns.length; j < jlen; j += 1) {
+						column	= cartColumn(settings.cartColumns[j]);
+						klass	= "item-" + (column.attr || (isString(column.view) ? column.view : column.label || column.text || "cell")) + " " + column.className;
+						content = cartCellView(item, column);
+						cell	= simpleCart.$create(TD).addClass(klass).html(content);
+
+						row.append(cell);
+					}
+					return row;
+				}
+
+			});
+
+			/*******************************************************************
+			 *	CART ITEM CLASS MANAGEMENT
+			 *******************************************************************/
+
+			simpleCart.Item = function (info) {//当使用new关键字时；这就是一个构造函数
+
+				// we use the data object to track values for the item
+				var _data = {},
+					me = this;
+
+				// cycle through given attributes and set them to the data object
+				if (isObject(info)) {
+					simpleCart.extend(_data, info);
+				}
+
+				// set the item id
+				item_id += 1;
+				_data.id = _data.id || item_id_namespace + item_id;
+				while (!isUndefined(sc_items[_data.id])) {
+					item_id += 1;
+					_data.id = item_id_namespace + item_id;
+				}
+
+				function checkQuantityAndPrice() {
+
+					// check to make sure price is valid
+					if (isString(_data.price)) {
+					   // trying to remove all chars that aren't numbers or '.'
+						_data.price = parseFloat(_data.price.replace(simpleCart.currency().decimal, ".").replace(/[^0-9\.]+/ig, ""));
+
+					}
+					if (isNaN(_data.price)) {
+						_data.price = 0;
+					}
+					if (_data.price < 0) {
+						_data.price = 0;
+					}
+
+					// check to make sure quantity is valid
+					if (isString(_data.quantity)) {
+						_data.quantity = parseInt(_data.quantity.replace(simpleCart.currency().delimiter, ""), 10);
+					}
+					if (isNaN(_data.quantity)) {
+						_data.quantity = 1;
+					}
+					if (_data.quantity <= 0) {
+						me.remove();
+					}
+
+				}
+
+				// getter and setter methods to access private variables 访问私有变量
+				me.get = function (name, skipPrototypes) {
+
+					var usePrototypes = !skipPrototypes;
+
+					if (isUndefined(name)) {
+						return name;
+					}
+
+					// return the value in order of the data object and then the prototype
+					return isFunction(_data[name])	? _data[name].call(me) :
+							!isUndefined(_data[name]) ? _data[name] :
+
+							isFunction(me[name]) && usePrototypes		? me[name].call(me) :
+							!isUndefined(me[name]) && usePrototypes	? me[name] :
+							_data[name];
+				};
+				me.set = function (name, value) {
+					if (!isUndefined(name)) {
+						_data[name.toLowerCase()] = value;
+						if (name.toLowerCase() === 'price' || name.toLowerCase() === 'quantity') {
+							checkQuantityAndPrice();
+						}
+					}
+					return me;
+				};
+				me.equals = function (item) {
+					for( var label in _data ){
+						if (Object.prototype.hasOwnProperty.call(_data, label)) {
+							if (label !== 'quantity' && label !== 'id') {
+								if (item.get(label) !== _data[label]) {
+									return false;
+								}
+							}
+						}
+					}
+					return true;
+				};
+				me.options = function () {
+					var data = {};
+					simpleCart.each(_data,function (val, x, label) {
+						var add = true;
+						simpleCart.each(me.reservedFields(), function (field) {
+							if (field === label) {
+								add = false;
+							}
+							return add;
+						});
+
+						if (add) {
+							data[label] = me.get(label);
+						}
+					});
+					return data;
+				};
+
+				checkQuantityAndPrice();
+			};
+
+
+			simpleCart.Item._ = simpleCart.Item.prototype = {//重写原型方法
+
+				// editing the item quantity
+				increment: function (amount) {
+					var diff = amount || 1;
+					diff = parseInt(diff, 10);
+
+					this.quantity(this.quantity() + diff);
+					if (this.quantity() < 1) {
+						this.remove();
+						return null;
+					}
+					return this;
+
+				},
+				decrement: function (amount) {
+					var diff = amount || 1;
+					return this.increment(-parseInt(diff, 10));
+				},
+				remove: function (skipUpdate) {
+					var removeItemBool = simpleCart.trigger("beforeRemove", [sc_items[this.id()]]);
+					if (removeItemBool === false ) {
+						return false;
+					}
+					delete sc_items[this.id()];
+					if (!skipUpdate) { 
+						simpleCart.update();
+					}
+					return null;
+				},
+
+				// special fields for items
+				reservedFields: function () {
+					return ['quantity', 'id', 'item_number', 'price', 'name', 'shipping', 'tax', 'taxRate'];
+				},
+
+				// return values for all reserved fields if they exist
+				fields: function () {
+					var data = {},
+						me = this;
+					simpleCart.each(me.reservedFields(), function (field) {
+						if (me.get(field)) {
+							data[field] = me.get(field);
+						}
+					});
+					return data;
+				},
+
+
+				// shortcuts for getter/setters. can
+				// be overwritten for customization
+				// btw, we are hiring at wojo design, and could
+				// use a great web designer. if thats you, you can
+				// get more info at http://wojodesign.com/now-hiring/
+				// or email me directly: brett@wojodesign.com
+				quantity: function (val) {
+					return isUndefined(val) ? parseInt(this.get("quantity", true) || 1, 10) : this.set("quantity", val);
+				},
+				price: function (val) {
+					return isUndefined(val) ?
+							parseFloat((this.get("price",true).toString()).replace(simpleCart.currency().symbol,"").replace(simpleCart.currency().delimiter,"") || 1) :
+							this.set("price", parseFloat((val).toString().replace(simpleCart.currency().symbol,"").replace(simpleCart.currency().delimiter,"")));
+				},
+				id: function () {
+					return this.get('id',false);
+				},
+				total:function () {
+					// console.log(this);
+					return this.quantity()*this.price();
+				}
+
+			};
+
+			/*******************************************************************
+			 *	CHECKOUT MANAGEMENT
+			 *******************************************************************/
+
+			simpleCart.extend({
+				checkout: function () {
+					if (settings.checkout.type.toLowerCase() === 'custom' && isFunction(settings.checkout.fn)) {//我设定的是paypal，所以不走这条路
+						settings.checkout.fn.call(simpleCart,settings.checkout);
+					} else if (isFunction(simpleCart.checkout[settings.checkout.type])) {//‘paypal’----------simpleCart.checkout['paypal']
+						var checkoutData = simpleCart.checkout[settings.checkout.type].call(simpleCart,settings.checkout);//那么就让simpleCart来执行这个函数；并且将参数传过去{ type: "PayPal", email: "x431software@gmail.com" }
+						
+						// if the checkout method returns data, try to send the form-----即将发送一个表单过去
+						if( checkoutData.data && checkoutData.action && checkoutData.method ){
+							// if no one has any objections, send the checkout form
+							if( false !== simpleCart.trigger('beforeCheckout', [checkoutData.data]) ){
+								simpleCart.generateAndSendForm( checkoutData );//生成表单并发送出去
+							}
+						}
+						
+					} else {
+						simpleCart.error("No Valid Checkout Method Specified");//有错误发生；那就是说没有合适的付款方式
+					}
+				},
+				extendCheckout: function (methods) {
+					return simpleCart.extend(simpleCart.checkout, methods);
+				},
+				generateAndSendForm: function (opts) {
+					var form = simpleCart.$create("form");//生成一个表单用于paypal付款；老外真的很麻烦
+					form.attr('style', 'display:hidden');//表单的属性有 style
+					form.attr('action', opts.action);//action
+					form.attr('method', opts.method);//method
+					simpleCart.each(opts.data, function (val, x, name) {
+						form.append(
+							simpleCart.$create("input").attr("type","hidden").attr("name",name).val(val));//能产生多少个input；全在此
+					});
+					simpleCart.$("body").append(form);
+					console.log(form);
+					form.el.submit();//提交之后；
+					form.remove();//表单销毁了
+				}
+			});
+
+			simpleCart.extendCheckout({//增加的付款功能；集成了paypal
+				PayPal: function (opts) {
+					// account email is required
+					if (!opts.email) {//起码邮箱是必要的
+						return simpleCart.error("No email provided for PayPal checkout");
+					}
+
+					// build basic form options  这都是paypal常规设置；需要查看 paypal详情
+					var data = {
+							  cmd			: "_cart"
+							, upload		: "2"
+							, currency_code : simpleCart.currency().code
+							, business		: opts.email
+							, rm			: opts.method === "GET" ? "0" : "2"
+							, handling_cart : (simpleCart.shipping()*simpleCart.quantity()).toFixed(2)
+							, charset		: "utf-8"
+						},
+						action = "https://www.paypal.com/cgi-bin/webscr",//这是跳转页面设置
+						method = opts.method === "GET" ? "GET" : "POST";
+
+
+					// check for return and success URLs in the options 在选项中添加 成功回执；取消回执和提醒回执
+					if (opts.success) {
+						data['return'] = opts.success;
+					}
+					if (opts.cancel) {
+						data.cancel_return = opts.cancel;
+					}
+					if (opts.notify) {
+						data.notify_url = opts.notify;
+					}
+
+
+					// add all the items to the form data
+					simpleCart.each(function (item,x) {
+						var counter = x+1,
+							item_options = item.options(),
+							optionCount = 0,
+							send;
+	
+						// basic item data
+						data["item_name_" + counter] = item.get("name");
+						data["quantity_" + counter] = item.quantity();
+						data["amount_" + counter] = (item.price()*1).toFixed(2);
+						data["item_number_" + counter] = item.get("item_number") || counter;
+
+
+						// add the options
+						simpleCart.each(item_options, function (val,k,attr) {
+							// paypal limits us to 10 options 只能有10个选项
+							if (k < 10) {
+		
+								// check to see if we need to exclude this from checkout
+								send = true;
+								simpleCart.each(settings.excludeFromCheckout, function (field_name) {
+									if (field_name === attr) { send = false; }
+								});
+								if (send) {
+										optionCount += 1;
+										data["on" + k + "_" + counter] = attr;
+										data["os" + k + "_" + counter] = val;
+								}
+	
+							}
+						});
+
+						// options count
+						data["option_index_"+ x] = Math.min(10, optionCount);//返回最小值
+					});
+
+
+					// return the data for the checkout form
+					return {
+						  action	: action
+						, method	: method
+						, data		: data
+					};
+
+				},
+
+				SendForm: function (opts) {
+					// url required
+					if (!opts.url) {
+						return simpleCart.error('URL required for SendForm Checkout');
+					}
+
+					// build basic form options
+					var data = {
+							  currency	: simpleCart.currency().code
+							, shipping	: simpleCart.shipping()
+							, tax		: simpleCart.tax()
+							, taxRate	: simpleCart.taxRate()
+							, itemCount : simpleCart.find({}).length
+						},
+						action = opts.url,
+						method = opts.method === "GET" ? "GET" : "POST";
+
+
+					// add items to data
+					simpleCart.each(function (item,x) {
+						var counter = x+1,
+							options_list = [],
+							send;
+						data['item_name_' + counter]		= item.get('name');
+						data['item_quantity_' + counter]	= item.quantity();
+						data['item_price_' + counter]		= item.price();
+
+						// create array of extra options
+						simpleCart.each(item.options(), function (val,x,attr) {
+							// check to see if we need to exclude this from checkout
+							send = true;
+							simpleCart.each(settings.excludeFromCheckout, function (field_name) {
+								if (field_name === attr) { send = false; }
+							});
+							if (send) {
+								options_list.push(attr + ": " + val);
+							}
+						});
+
+						// add the options to the description
+						data['item_options_' + counter] = options_list.join(", ");
+					});
+
+
+					// check for return and success URLs in the options
+					if (opts.success) {
+						data['return'] = opts.success;
+					}
+					if (opts.cancel) {
+						data.cancel_return = opts.cancel;
+					}
+
+					if (opts.extra_data) {
+						data = simpleCart.extend(data,opts.extra_data);
+					}
+
+					// return the data for the checkout form
+					return {
+						  action	: action
+						, method	: method
+						, data		: data
+					};
+				}
+
+			});
+
+			/*******************************************************************
+			 *	EVENT MANAGEMENT 事件方法总汇
+			 *******************************************************************/
+			eventFunctions = {
+
+				// bind a callback to an event
+				bind: function (name, callback) {
+					if (!isFunction(callback)) {
+						return this;
+					}
+
+					if (!this._events) {
+						this._events = {};
+					}
+					
+					// split by spaces to allow for multiple event bindings at once
+					var eventNameList = name.split(/ +/);
+					
+					// iterate through and bind each event
+					simpleCart.each( eventNameList , function( eventName ){
+						if (this._events[eventName] === true) {
+							callback.apply(this);
+						} else if (!isUndefined(this._events[eventName])) {
+							this._events[eventName].push(callback);
+						} else {
+							this._events[eventName] = [callback];
+						}
+					});
+
+					
+					return this;
+				},
+				
+				// trigger event
+				trigger: function (name, options) {
+					var returnval = true,
+						x,
+						xlen;
+
+					if (!this._events) {
+						this._events = {};
+					}
+					if (!isUndefined(this._events[name]) && isFunction(this._events[name][0])) {
+						for (x = 0, xlen = this._events[name].length; x < xlen; x += 1) {
+							returnval = this._events[name][x].apply(this, (options || []));
+						}
+					}
+					if (returnval === false) {
+						return false;
+					}
+					return true;
+				}
+
+			};
+			// alias for bind
+			eventFunctions.on = eventFunctions.bind;
+			simpleCart.extend(eventFunctions);
+			simpleCart.extend(simpleCart.Item._, eventFunctions);
+
+			// base simpleCart events in options
+			baseEvents = {
+				  beforeAdd				: null
+				, afterAdd				: null
+				, load					: null
+				, beforeSave			: null
+				, afterSave				: null
+				, update				: null
+				, ready					: null
+				, checkoutSuccess		: null
+				, checkoutFail			: null
+				, beforeCheckout		: null
+				, beforeRemove			: null
+			};
+			
+			// extend with base events
+			simpleCart(baseEvents);
+
+			// bind settings to events
+			simpleCart.each(baseEvents, function (val, x, name) {
+				simpleCart.bind(name, function () {
+					if (isFunction(settings[name])) {
+						settings[name].apply(this, arguments);
+					}
+				});
+			});
+
+			/*******************************************************************
+			 *	FORMATTING FUNCTIONS
+			 *******************************************************************/
+			simpleCart.extend({
+				toCurrency: function (number,opts) {
+					var num = parseFloat(number),
+						opt_input = opts || {},
+						_opts = simpleCart.extend(simpleCart.extend({
+							  symbol:		"$"
+							, decimal:		"."
+							, delimiter:	","
+							, accuracy:		2
+							, after: false
+						}, simpleCart.currency()), opt_input),
+
+						numParts = num.toFixed(_opts.accuracy).split("."),
+						dec = numParts[1],
+						ints = numParts[0];
+			
+					ints = simpleCart.chunk(ints.reverse(), 3).join(_opts.delimiter.reverse()).reverse();
+
+					return	(!_opts.after ? _opts.symbol : "") +
+							ints +
+							(dec ? _opts.decimal + dec : "") +
+							(_opts.after ? _opts.symbol : "");
+	
+				},
+
+
+				// break a string in blocks of size n
+				chunk: function (str, n) {
+					if (typeof n==='undefined') {
+						n=2;
+					}
+					var result = str.match(new RegExp('.{1,' + n + '}','g'));
+					return result || [];
+				}
+
+			});
+
+
+			// reverse string function
+			String.prototype.reverse = function () {
+				return this.split("").reverse().join("");
+			};
+
+
+			// currency functions
+			simpleCart.extend({
+				currency: function (currency) {
+					if (isString(currency) && !isUndefined(currencies[currency])) {
+						settings.currency = currency;
+					} else if (isObject(currency)) {
+						currencies[currency.code] = currency;
+						settings.currency = currency.code;
+					} else {
+						return currencies[settings.currency];
+					}
+				}
+			});
+
+
+			/*******************************************************************
+			 *	VIEW MANAGEMENT
+			 *******************************************************************/
+
+			simpleCart.extend({
+				// bind outlets to function
+				bindOutlets: function (outlets) {
+					simpleCart.each(outlets, function (callback, x, selector) {
+						
+						simpleCart.bind('update', function () {
+							simpleCart.setOutlet("." + namespace + "_" + selector, callback);
+						});
+					});
+				},
+
+				// set function return to outlet
+				setOutlet: function (selector, func) {
+					var val = func.call(simpleCart, selector);
+					if (isObject(val) && val.el) {
+						simpleCart.$(selector).html(' ').append(val);
+					} else if (!isUndefined(val)) {
+						simpleCart.$(selector).html(val);
+					}
+				},
+
+				// bind click events on inputs
+				bindInputs: function (inputs) {
+					simpleCart.each(inputs, function (info) {
+						simpleCart.setInput("." + namespace + "_" + info.selector, info.event, info.callback);
+					});
+				},
+
+				// attach events to inputs	
+				setInput: function (selector, event, func) {
+					simpleCart.$(selector).live(event, func);
+				}
+			});		
+
+
+			// class for wrapping DOM selector shit
+			simpleCart.ELEMENT = function (selector) {
+				this.create(selector);
+				this.selector = selector || null; // "#" + this.attr('id'); TODO: test length?
+			};
+
+			simpleCart.extend(selectorFunctions, {
+				"jQuery": {
+					passthrough: function (action, val) {
+						if (isUndefined(val)) {
+							return this.el[action]();
+						}
+						
+						this.el[action](val);
+						return this;
+					},
+					text: function (text) {
+						return this.passthrough(_TEXT_, text);
+					},
+					html: function (html) {
+						return this.passthrough(_HTML_, html);
+					},
+					val: function (val) {
+						return this.passthrough("val", val);
+					},
+					append: function (item) {
+						var target = item.el || item;
+						this.el.append(target);
+						return this;
+					},
+					attr: function (attr, val) {
+						if (isUndefined(val)) {
+							return this.el.attr(attr);
+						}
+						this.el.attr(attr, val);
+						return this;
+					},
+					remove: function () {
+						this.el.remove();
+						return this;
+					},
+					addClass: function (klass) {
+						this.el.addClass(klass);
+						return this;
+					},
+					removeClass: function (klass) {
+						this.el.removeClass(klass);
+						return this;
+					},
+					each: function (callback) {
+						return this.passthrough('each', callback);
+					},
+					click: function (callback) {
+						return this.passthrough(_CLICK_, callback);
+					},
+					live: function (event, callback) {
+						$engine(document).delegate(this.selector, event, callback);
+						return this;
+					},
+					parent: function () {
+						return simpleCart.$(this.el.parent());
+					},
+					find: function (selector) {
+						return simpleCart.$(this.el.find(selector));
+					},
+					closest: function (selector) {
+						return simpleCart.$(this.el.closest(selector));
+					},
+					tag: function () {
+						return this.el[0].tagName;
+					},
+					descendants: function () {
+						return simpleCart.$(this.el.find("*"));
+					},
+					submit: function() {
+						return this.el.submit();
+					},
+
+					create: function (selector) {
+						this.el = $engine(selector);
+					}
+				}
+			});
+
+			simpleCart.ELEMENT._ = simpleCart.ELEMENT.prototype;
+
+			// bind the DOM setup to the ready event
+			simpleCart.ready(simpleCart.setupViewTool);
+
+			// bind the input and output events
+			simpleCart.ready(function () {
+				simpleCart.bindOutlets({
+					total: function () {
+						return simpleCart.toCurrency(simpleCart.total());
+					}
+					, quantity: function () {
+						return simpleCart.quantity();
+					}
+					, items: function (selector) {
+						simpleCart.writeCart(selector);
+					}
+					, tax: function () {
+						return simpleCart.toCurrency(simpleCart.tax());
+					}
+					, taxRate: function () {
+						return simpleCart.taxRate().toFixed();
+					}
+					, shipping: function () {
+						return simpleCart.toCurrency(simpleCart.shipping()*simpleCart.quantity());
+					}
+					, grandTotal: function () {
+						return simpleCart.toCurrency(simpleCart.grandTotal());
+					}
+				});
+				simpleCart.bindInputs([
+					{	  selector: 'checkout'
+						, event: 'click'
+						, callback: function () {
+							simpleCart.checkout();
+						}
+					}
+					, {	  selector: 'empty'
+						, event: 'click'
+						, callback: function () {
+							simpleCart.empty();
+						}
+					}
+					, {	  selector: 'increment'
+						, event: 'click'
+						, callback: function () {
+							simpleCart.find(simpleCart.$(this).closest('.itemRow').attr('id').split("_")[1]).increment();
+							simpleCart.update();
+						}
+					}
+					, {	  selector: 'decrement'
+						, event: 'click'
+						, callback: function () {
+							simpleCart.find(simpleCart.$(this).closest('.itemRow').attr('id').split("_")[1]).decrement();
+							simpleCart.update();
+						}
+					}
+					/* remove from cart */
+					, {	  selector: 'remove'
+						, event: 'click'
+						, callback: function () {
+							simpleCart.find(simpleCart.$(this).closest('.itemRow').attr('id').split("_")[1]).remove();
+						}
+					}
+
+					/* cart inputs */
+					, {	  selector: 'input'
+						, event: 'change'
+						, callback: function () {
+							var $input = simpleCart.$(this),
+								$parent = $input.parent(),
+								classList = $parent.attr('class').split(" ");
+							simpleCart.each(classList, function (klass) {
+								if (klass.match(/item-.+/i)) {
+									var field = klass.split("-")[1];
+									simpleCart.find($parent.closest('.itemRow').attr('id').split("_")[1]).set(field,$input.val());
+									simpleCart.update();
+									return;
+								}
+							});
+						}
+					}
+
+					/* here is our shelfItem add to cart button listener */
+					, { selector: 'shelfItem .item_add'
+						, event: 'click'
+						, callback: function () {
+							var $button = simpleCart.$(this),
+								fields = {};
+
+							$button.closest("." + namespace + "_shelfItem").descendants().each(function (x,item) {
+								var $item = simpleCart.$(item);
+
+								// check to see if the class matches the item_[fieldname] pattern
+								if ($item.attr("class") &&
+									$item.attr("class").match(/item_.+/) &&
+									!$item.attr('class').match(/item_add/)) {
+
+									// find the class name
+									simpleCart.each($item.attr('class').split(' '), function (klass) {
+										var attr,
+											val,
+											type;
+
+										// get the value or text depending on the tagName
+										if (klass.match(/item_.+/)) {
+											attr = klass.split("_")[1];
+											val = "";
+											switch($item.tag().toLowerCase()) {
+												case "input":
+												case "textarea":
+												case "select":
+													type = $item.attr("type");
+													if (!type || ((type.toLowerCase() === "checkbox" || type.toLowerCase() === "radio") && $item.attr("checked")) || type.toLowerCase() === "text" || type.toLowerCase() === "number") {
+														val = $item.val();
+													}				
+													break;
+												case "img":
+													val = $item.attr('src');
+													break;
+												default:
+													val = $item.text();
+													break;
+											}
+
+											if (val !== null && val !== "") {
+												fields[attr.toLowerCase()] = fields[attr.toLowerCase()] ? fields[attr.toLowerCase()] + ", " +  val : val;
+											}
+										}
+									});
+								}
+							});
+
+							// add the item
+							simpleCart.add(fields);
+						}
+					}
+				]);
+			});
+
+
+			/*******************************************************************
+			 *	DOM READY
+			 *******************************************************************/
+			// Cleanup functions for the document ready method
+			// used from jQuery
+			/*global DOMContentLoaded */
+			if (document.addEventListener) {
+				window.DOMContentLoaded = function () {
+					document.removeEventListener("DOMContentLoaded", DOMContentLoaded, false);
+					simpleCart.init();
+				};
+
+			} else if (document.attachEvent) {
+				window.DOMContentLoaded = function () {
+					// Make sure body exists, at least, in case IE gets a little overzealous (ticket #5443).
+					if (document.readyState === "complete") {
+						document.detachEvent("onreadystatechange", DOMContentLoaded);
+						simpleCart.init();
+					}
+				};
+			}
+			// The DOM ready check for Internet Explorer
+			// used from jQuery
+			function doScrollCheck() {
+				if (simpleCart.isReady) {
+					return;
+				}
+
+				try {
+					// If IE is used, use the trick by Diego Perini
+					// http://javascript.nwbox.com/IEContentLoaded/
+					document.documentElement.doScroll("left");
+				} catch (e) {
+					setTimeout(doScrollCheck, 1);
+					return;
+				}
+
+				// and execute any waiting functions
+				simpleCart.init();
+			}
+			
+			// bind ready event used from jquery
+			function sc_BindReady () {
+
+				// Catch cases where $(document).ready() is called after the
+				// browser event has already occurred.
+				if (document.readyState === "complete") {
+					// Handle it asynchronously to allow scripts the opportunity to delay ready
+					return setTimeout(simpleCart.init, 1);
+				}
+
+				// Mozilla, Opera and webkit nightlies currently support this event
+				if (document.addEventListener) {
+					// Use the handy event callback
+					document.addEventListener("DOMContentLoaded", DOMContentLoaded, false);
+
+					// A fallback to window.onload, that will always work
+					window.addEventListener("load", simpleCart.init, false);
+
+				// If IE event model is used
+				} else if (document.attachEvent) {
+					// ensure firing before onload,
+					// maybe late but safe also for iframes
+					document.attachEvent("onreadystatechange", DOMContentLoaded);
+
+					// A fallback to window.onload, that will always work
+					window.attachEvent("onload", simpleCart.init);
+
+					// If IE and not a frame
+					// continually check to see if the document is ready
+					var toplevel = false;
+
+					try {
+						toplevel = window.frameElement === null;
+					} catch (e) {}
+
+					if (document.documentElement.doScroll && toplevel) {
+						doScrollCheck();
+					}
+				}
+			}
+
+			// bind the ready event
+			sc_BindReady();
+
+			return simpleCart;
+		};
+
+	window.simpleCart = generateSimpleCart();
+
+}(window, document));
+
